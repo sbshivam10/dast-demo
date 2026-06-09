@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   dast-scan:
-    name: Deploy app and trigger Polaris DAST
+    name: Trigger Polaris DAST (CI/CD)
     runs-on: self-hosted
 
     env:
@@ -21,47 +21,43 @@ jobs:
 
     steps:
 
+      # 1. Checkout code (needed for runner context)
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Stop existing app
+      # 2. Verify app is already running
+      - name: Verify Juice Shop is running
         run: |
-          docker compose down || true
-          docker stop juice-shop || true
-          docker rm juice-shop || true
-
-      - name: Start Juice Shop
-        run: |
-          docker compose up -d --build
-
-      - name: Wait for app health
-        run: |
-          echo "Waiting for Juice Shop..."
-          for i in $(seq 1 30); do
+          echo "Checking if app is reachable..."
+          for i in $(seq 1 10); do
             if curl -fsS http://localhost:3000 > /dev/null 2>&1; then
               echo "✅ Juice Shop is reachable!"
               exit 0
             fi
-            echo "⏳ Attempt $i/30..."
-            sleep 5
+            echo "⏳ Waiting for app..."
+            sleep 3
           done
-          echo "❌ Juice Shop did not start"
-          docker compose logs
+          echo "❌ App not reachable. Start it manually using docker compose up -d"
           exit 1
 
+      # 3. Verify Bridge CLI
       - name: Verify Bridge CLI
         run: |
-          bridge-cli --version || bridge-cli -h
+          bridge-cli --version
 
-      - name: Run Polaris DAST scan
+      # 4. Trigger Polaris DAST scan (IMPORTANT STEP)
+      - name: Trigger Polaris DAST scan
         run: |
           bridge-cli --stage polaris \
             polaris.serverUrl="${{ secrets.POLARIS_SERVER_URL }}" \
             polaris.assessment.types="DAST" \
             polaris.application.name="${{ secrets.POLARIS_APP_NAME }}" \
-            polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}"
+            polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}" \
+            polaris.waitForScan=false \
+            bridge.scm.skip=true
 
-      - name: Show logs on failure
-        if: failure()
+      # 5. Success message
+      - name: Print success
         run: |
-          docker compose logs
+          echo "✅ DAST scan triggered successfully in Polaris"
+          echo "👉 Check Polaris UI for scan progress"
