@@ -21,11 +21,11 @@ jobs:
 
     steps:
 
-      # 1. Checkout code (needed for runner context)
+      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Verify app is already running
+      # 2. Verify app is running
       - name: Verify Juice Shop is running
         run: |
           echo "Checking if app is reachable..."
@@ -37,7 +37,7 @@ jobs:
             echo "⏳ Waiting for app..."
             sleep 3
           done
-          echo "❌ App not reachable. Start it manually using docker compose up -d"
+          echo "❌ App not reachable. Run: docker compose up -d"
           exit 1
 
       # 3. Verify Bridge CLI
@@ -45,7 +45,7 @@ jobs:
         run: |
           bridge-cli --version
 
-      # 4. Trigger Polaris DAST scan (IMPORTANT STEP)
+      # 4. Trigger Polaris DAST scan (KEY STEP)
       - name: Trigger Polaris DAST scan
         run: |
           bridge-cli --stage polaris \
@@ -53,11 +53,11 @@ jobs:
             polaris.assessment.types="DAST" \
             polaris.application.name="${{ secrets.POLARIS_APP_NAME }}" \
             polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}" \
-            polaris.waitForScan=false \
-            bridge.scm.skip=true
+            polaris.waitForScan=false
 
       # 5. Success message
       - name: Print success
         run: |
-          echo "✅ DAST scan triggered successfully in Polaris"
-          echo "👉 Check Polaris UI for scan progress"
+          echo "✅ DAST scan triggered successfully"
+          echo "👉 Check Polaris dashboard"
+
