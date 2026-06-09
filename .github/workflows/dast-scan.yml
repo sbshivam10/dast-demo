@@ -13,8 +13,9 @@ concurrency:
 
 jobs:
   dast-scan:
-    name: Trigger Polaris DAST (CI/CD)
+    name: Trigger Polaris DAST and keep tunnel alive
     runs-on: self-hosted
+    timeout-minutes: 90
 
     env:
       BRIDGE_POLARIS_ACCESSTOKEN: ${{ secrets.POLARIS_ACCESS_TOKEN }}
@@ -46,34 +47,17 @@ jobs:
         run: |
           bridge-cli --version
 
-      - name: Trigger Polaris DAST scan
+      - name: Run Polaris DAST scan and keep Secure Tunnel open
         shell: bash
         run: |
-          set +e
-
           bridge-cli --stage polaris \
             polaris.serverUrl="${{ secrets.POLARIS_SERVER_URL }}" \
             polaris.assessment.types="DAST" \
             polaris.application.name="${{ secrets.POLARIS_APP_NAME }}" \
-            polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}" \
-            polaris.waitForScan=false 2>&1 | tee bridge-output.log
-
-          BRIDGE_EXIT_CODE=${PIPESTATUS[0]}
-
-          echo "Bridge CLI exit code: ${BRIDGE_EXIT_CODE}"
-
-          if grep -q "Successfully created test" bridge-output.log; then
-            echo "✅ Polaris DAST scan was successfully triggered."
-            echo "Bridge CLI returned a non-zero code after async trigger, but the test was created successfully."
-            exit 0
-          fi
-
-          echo "❌ Polaris DAST scan was not confirmed as created."
-          echo "Bridge CLI output did not contain: Successfully created test"
-          exit ${BRIDGE_EXIT_CODE}
+            polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}"
 
       - name: Print success
         shell: bash
         run: |
-          echo "✅ GitHub Actions pipeline completed successfully."
-          echo "👉 Check Polaris UI for DAST scan progress and results."
+          echo "✅ DAST scan completed through GitHub Actions."
+          echo "👉 Check Polaris UI for findings, crawl report, and issue evidence."
