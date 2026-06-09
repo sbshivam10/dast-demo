@@ -1,0 +1,67 @@
+name: DAST Scan - Juice Shop via Bridge CLI + Teleport
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: dast-scan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dast-scan:
+    name: Deploy app and trigger Polaris DAST
+    runs-on: self-hosted
+
+    env:
+      BRIDGE_POLARIS_ACCESSTOKEN: ${{ secrets.POLARIS_ACCESS_TOKEN }}
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Stop existing app
+        run: |
+          docker compose down || true
+          docker stop juice-shop || true
+          docker rm juice-shop || true
+
+      - name: Start Juice Shop
+        run: |
+          docker compose up -d --build
+
+      - name: Wait for app health
+        run: |
+          echo "Waiting for Juice Shop..."
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000 > /dev/null 2>&1; then
+              echo "✅ Juice Shop is reachable!"
+              exit 0
+            fi
+            echo "⏳ Attempt $i/30..."
+            sleep 5
+          done
+          echo "❌ Juice Shop did not start"
+          docker compose logs
+          exit 1
+
+      - name: Verify Bridge CLI
+        run: |
+          bridge-cli --version || bridge-cli -h
+
+      - name: Run Polaris DAST scan
+        run: |
+          bridge-cli --stage polaris \
+            polaris.serverUrl="${{ secrets.POLARIS_SERVER_URL }}" \
+            polaris.assessment.types="DAST" \
+            polaris.application.name="${{ secrets.POLARIS_APP_NAME }}" \
+            polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}"
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker compose logs
