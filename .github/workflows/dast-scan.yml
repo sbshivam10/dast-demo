@@ -13,33 +13,42 @@ concurrency:
 
 jobs:
   dast-scan:
-    name: Trigger Polaris DAST and keep tunnel alive
+    name: Build app, keep tunnel alive, trigger Polaris DAST
     runs-on: self-hosted
-    timeout-minutes: 90
+    timeout-minutes: 45
 
     env:
       BRIDGE_POLARIS_ACCESSTOKEN: ${{ secrets.POLARIS_ACCESS_TOKEN }}
+
+      # Keep the tunnel alive after triggering the DAST scan.
+      # Adjust if your scan needs longer.
+      TUNNEL_KEEPALIVE_SECONDS: 1800
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Build and start Juice Shop
+        shell: bash
+        run: |
+          echo "Starting Juice Shop..."
+          docker compose up -d --build
+
       - name: Verify Juice Shop is running
         shell: bash
         run: |
           echo "Checking if Juice Shop is reachable on http://localhost:3000 ..."
-          for i in $(seq 1 10); do
+          for i in $(seq 1 20); do
             if curl -fsS http://localhost:3000 > /dev/null 2>&1; then
               echo "✅ Juice Shop is reachable!"
               exit 0
             fi
-            echo "⏳ Waiting for Juice Shop... attempt $i/10"
+            echo "⏳ Waiting for Juice Shop... attempt $i/20"
             sleep 3
           done
 
           echo "❌ Juice Shop is not reachable."
-          echo "Start it manually before running the workflow:"
-          echo "docker compose up -d"
+          docker compose logs
           exit 1
 
       - name: Verify Bridge CLI
@@ -47,17 +56,79 @@ jobs:
         run: |
           bridge-cli --version
 
-      - name: Run Polaris DAST scan and keep Secure Tunnel open
+      - name: Start Polaris Secure Tunnel in background
         shell: bash
         run: |
+          echo "Starting Secure Tunnel in background..."
+
+          bridge-cli --stage polaris-secure-tunnel \
+            polaris.serverUrl="${{ secrets.POLARIS_SERVER_URL }}" \
+            polaris.application.name="${{ secrets.POLARIS_APP_NAME }}" \
+            polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}" \
+            > secure-tunnel.log 2>&1 &
+
+          echo $! > secure-tunnel.pid
+
+          echo "Secure Tunnel process PID:"
+          cat secure-tunnel.pid
+
+          echo "Giving Secure Tunnel time to initialise..."
+          sleep 30
+
+          echo "Secure Tunnel startup log:"
+          cat secure-tunnel.log || true
+
+      - name: Trigger Polaris DAST scan
+        shell: bash
+        run: |
+          set +e
+
+          echo "Triggering Polaris DAST scan..."
+
           bridge-cli --stage polaris \
             polaris.serverUrl="${{ secrets.POLARIS_SERVER_URL }}" \
             polaris.assessment.types="DAST" \
             polaris.application.name="${{ secrets.POLARIS_APP_NAME }}" \
-            polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}"
+            polaris.project.name="${{ secrets.POLARIS_PROJECT_NAME }}" \
+            polaris.waitForScan=false 2>&1 | tee bridge-output.log
 
-      - name: Print success
+          BRIDGE_EXIT_CODE=${PIPESTATUS[0]}
+
+          echo "Bridge CLI exit code: ${BRIDGE_EXIT_CODE}"
+
+          if grep -q "Successfully created test" bridge-output.log; then
+            echo "✅ Polaris DAST scan was successfully triggered."
+            exit 0
+          fi
+
+          echo "❌ Polaris DAST scan was not confirmed as created."
+          echo "Bridge CLI output did not contain: Successfully created test"
+          exit ${BRIDGE_EXIT_CODE}
+
+      - name: Keep Secure Tunnel alive while scan runs
         shell: bash
         run: |
-          echo "✅ DAST scan completed through GitHub Actions."
-          echo "👉 Check Polaris UI for findings, crawl report, and issue evidence."
+          echo "Keeping Secure Tunnel alive for Polaris DAST scan..."
+          echo "Tunnel keepalive seconds: ${TUNNEL_KEEPALIVE_SECONDS}"
+          sleep "${TUNNEL_KEEPALIVE_SECONDS}"
+
+      - name: Stop Secure Tunnel
+        if: always()
+        shell: bash
+        run: |
+          echo "Stopping Secure Tunnel if still running..."
+
+          if [ -f secure-tunnel.pid ]; then
+            TUNNEL_PID=$(cat secure-tunnel.pid)
+            echo "Stopping PID: ${TUNNEL_PID}"
+            kill "${TUNNEL_PID}" || true
+          fi
+
+          echo "Final Secure Tunnel log:"
+          cat secure-tunnel.log || true
+
+      - name: Print final message
+        shell: bash
+        run: |
+          echo "✅ GitHub Actions workflow completed."
+          echo "👉 Check Polaris UI for DAST scan progress, crawl report, and findings."
