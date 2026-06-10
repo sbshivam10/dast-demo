@@ -22,7 +22,7 @@ jobs:
 
       # Keep the tunnel alive after triggering the DAST scan.
       # Adjust if your scan needs longer.
-      TUNNEL_KEEPALIVE_SECONDS: 1800
+      TUNNEL_KEEPALIVE_SECONDS: 2400
 
     steps:
       - name: Checkout code
